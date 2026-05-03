@@ -132,13 +132,20 @@ def build_comics():
         series_title, volume = parse_volume(title_raw)
         cid, sid = make_id(series_title, volume)
 
-        # 著者
+        # 著者（OpenBDのsummary.authorは「姓, 名, 生年-」形式なのでクリーンアップ）
+        def clean_author(raw: str) -> str:
+            # "姓, 名, 1960-" → "姓名" に変換
+            parts = [p.strip().rstrip("-").strip() for p in raw.split(",")]
+            # 末尾が年号（数字）のパートは除去
+            parts = [p for p in parts if p and not re.match(r"^\d{4}$", p)]
+            return "".join(parts)
+
         authors = []
         for cont in onix.get("DescriptiveDetail", {}).get("Contributor", []):
             name = cont.get("PersonName", {}).get("content", "")
             if name:
-                authors.append(name)
-        author = "／".join(authors) if authors else s.get("author", "")
+                authors.append(clean_author(name))
+        author = "／".join(authors) if authors else clean_author(s.get("author", ""))
 
         # 発売日
         supply = onix.get("ProductSupply", {})
@@ -148,15 +155,17 @@ def build_comics():
         date_str = on_sale or (pub_date[0].get("Date","") if pub_date else "")
         release_date = parse_date(date_str) if date_str else parse_date(s.get("pubdate",""))
 
-        # レーベル
+        # レーベル（OpenBD ONIXのCollectionはdict、CollectionTypeは文字列）
         coll = onix.get("DescriptiveDetail", {}).get("Collection", {})
         label = ""
-        if isinstance(coll, dict):
-            for ct in coll.get("CollectionType", []):
-                if ct == "10":
-                    for ti in coll.get("TitleDetail", []):
-                        for tel in ti.get("TitleElement", []):
-                            label = tel.get("TitleText", {}).get("content", "") or label
+        if isinstance(coll, dict) and coll.get("CollectionType") == "10":
+            for ti in coll.get("TitleDetail", []):
+                for tel in ti.get("TitleElement", []):
+                    label = tel.get("TitleText", {}).get("content", "") or label
+
+        isbn = normalize_isbn(s.get("isbn", ""))
+        # OpenBDはsummary.coverが空でもISBNからカバーURLを構築できる
+        cover_url = s.get("cover", "") or (f"https://cover.openbd.jp/{isbn}.jpg" if isbn else "")
 
         comics.append({
             "id":           cid,
@@ -166,10 +175,10 @@ def build_comics():
             "volume":       volume,
             "author":       author,
             "release_date": release_date,
-            "cover_url":    s.get("cover", ""),
+            "cover_url":    cover_url,
             "detail_url":   "",
             "label":        label,
-            "isbn":         normalize_isbn(s.get("isbn", "")),
+            "isbn":         isbn,
         })
 
     return comics
