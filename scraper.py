@@ -1,53 +1,40 @@
 #!/usr/bin/env python3
 """
-講談社コミックス新刊スクレイパー
-kc.kodansha.co.jp/new_release から新刊情報を取得して data/comics.json に保存する
+講談社コミックス新刊スクレイパー（Playwright版）
+kc.kodansha.co.jp/new_release から新刊情報を取得して
+  data/comics.json … JSON
+  data/comics.js  … <script src> でそのまま読める形式（file://対応）
+に保存する。
+
+初回セットアップ:
+  pip install -r requirements.txt
+  playwright install chromium
 """
 
 import json
 import re
 import time
 import hashlib
-from datetime import datetime, date
+import argparse
+from datetime import datetime
 from pathlib import Path
-from urllib.parse import urljoin, urlencode
-
-import requests
-from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 BASE_URL = "https://kc.kodansha.co.jp"
 NEW_RELEASE_URL = f"{BASE_URL}/new_release"
-OUTPUT_PATH = Path(__file__).parent / "data" / "comics.json"
+JSON_PATH = Path(__file__).parent / "data" / "comics.json"
+JS_PATH   = Path(__file__).parent / "data" / "comics.js"
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Cache-Control": "max-age=0",
-}
 
+# ─── ユーティリティ ────────────────────────────────────────────
 
 def make_series_id(series_title: str) -> str:
-    """シリーズタイトルからIDを生成する"""
     normalized = re.sub(r"\s+", "", series_title.strip())
     return hashlib.md5(normalized.encode("utf-8")).hexdigest()[:12]
 
 
 def parse_volume(title: str) -> tuple[str, str]:
-    """タイトルからシリーズ名と巻数を分離する
-    例: "進撃の巨人（34）" -> ("進撃の巨人", "34")
-    """
-    # パターン: タイトル（巻数）or タイトル 巻数巻 or タイトル(n)
+    """タイトルから (シリーズ名, 巻数文字列) を分離する。"""
     patterns = [
         r"^(.+?)[\s　]*[（(](\d+)[）)]\s*$",
         r"^(.+?)[\s　]+第?(\d+)巻?\s*$",
@@ -60,88 +47,214 @@ def parse_volume(title: str) -> tuple[str, str]:
     return title.strip(), ""
 
 
-def fetch_page(session: requests.Session, url: str, retries: int = 3) -> BeautifulSoup | None:
-    for attempt in range(retries):
-        try:
-            resp = session.get(url, headers=HEADERS, timeout=20)
-            resp.raise_for_status()
-            resp.encoding = resp.apparent_encoding
-            return BeautifulSoup(resp.text, "html.parser")
-        except requests.HTTPError as e:
-            print(f"  HTTP {e.response.status_code}: {url}")
-            if e.response.status_code in (403, 404):
-                return None
-            time.sleep(2 ** attempt)
-        except requests.RequestException as e:
-            print(f"  Request error ({attempt + 1}/{retries}): {e}")
-            time.sleep(2 ** attempt)
-    return None
+def parse_date(text: str) -> str:
+    m = re.search(r"(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})", text)
+    if m:
+        return f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    return ""
 
 
-def parse_comic_item(item) -> dict | None:
-    """個別のコミックHTML要素をパースする"""
+# ─── Playwright スクレイピング ──────────────────────────────────
+
+def scrape_with_playwright(months: int = 3, debug: bool = False) -> list[dict]:
+    from playwright.sync_api import sync_playwright
+
+    all_comics: list[dict] = []
+    seen_ids: set[str] = set()
+
+    now = datetime.now()
+    urls = [NEW_RELEASE_URL]
+    for i in range(months):
+        m = (now.month - i - 1) % 12 + 1
+        y = now.year - ((now.month - i - 1) // 12)
+        urls.append(f"{NEW_RELEASE_URL}?year={y}&month={m:02d}")
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=True)
+        ctx = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+            locale="ja-JP",
+        )
+        page = ctx.new_page()
+
+        for url in urls:
+            print(f"Fetching: {url}")
+            try:
+                page.goto(url, wait_until="networkidle", timeout=30_000)
+            except Exception as e:
+                print(f"  Navigation error: {e}")
+                continue
+
+            # デバッグ: HTMLをファイルに保存
+            if debug:
+                debug_file = Path(__file__).parent / "data" / "debug_page.html"
+                debug_file.write_text(page.content(), encoding="utf-8")
+                print(f"  Debug HTML saved to {debug_file}")
+
+            comics = extract_comics_from_page(page)
+            print(f"  Found {len(comics)} items")
+
+            for comic in comics:
+                if comic["id"] not in seen_ids:
+                    seen_ids.add(comic["id"])
+                    all_comics.append(comic)
+
+            # ページネーション
+            page_num = 2
+            while page_num <= 20:
+                next_btn = (
+                    page.query_selector("a.next")
+                    or page.query_selector(".pagination a[rel='next']")
+                    or page.query_selector("a:has-text('次へ')")
+                    or page.query_selector("a:has-text('>')")
+                )
+                if not next_btn:
+                    break
+                href = next_btn.get_attribute("href")
+                if not href:
+                    break
+                next_url = urljoin(BASE_URL, href)
+                print(f"  Fetching page {page_num}: {next_url}")
+                try:
+                    page.goto(next_url, wait_until="networkidle", timeout=30_000)
+                except Exception as e:
+                    print(f"  Navigation error: {e}")
+                    break
+                more = extract_comics_from_page(page)
+                print(f"    Found {len(more)} items")
+                for comic in more:
+                    if comic["id"] not in seen_ids:
+                        seen_ids.add(comic["id"])
+                        all_comics.append(comic)
+                page_num += 1
+
+        browser.close()
+
+    return all_comics
+
+
+def extract_comics_from_page(page) -> list[dict]:
+    """ページから個々のコミック情報を抽出する。"""
+
+    # 候補セレクタ群（サイト構造に合わせて優先度順）
+    CONTAINER_SELECTORS = [
+        "ul.o-section-list__list li",
+        ".o-section-list__list li",
+        "ul.c-book-list li",
+        ".c-book-list__item",
+        ".p-book-list__item",
+        ".release-list li",
+        ".new-release li",
+        ".book-list li",
+        "li.book",
+        "article.book",
+        ".product-list li",
+        ".item-list li",
+        "li[class*='book']",
+        "li[class*='product']",
+        "li[class*='item']",
+    ]
+
+    items = []
+    for sel in CONTAINER_SELECTORS:
+        els = page.query_selector_all(sel)
+        if els:
+            items = els
+            break
+
+    if not items:
+        # JSON-LDからのフォールバック
+        return extract_from_json_ld(page)
+
+    results = []
+    for el in items:
+        comic = parse_element(el, page)
+        if comic:
+            results.append(comic)
+    return results
+
+
+def parse_element(el, page) -> dict | None:
+    """個別のDOM要素からコミック情報をパースする。"""
     try:
         # タイトル
         title_el = (
-            item.select_one(".item-title")
-            or item.select_one(".product-name")
-            or item.select_one("h3")
-            or item.select_one("h2")
-            or item.select_one(".title")
+            el.query_selector(".c-book__title")
+            or el.query_selector(".o-book__title")
+            or el.query_selector(".p-book__title")
+            or el.query_selector("[class*='title']")
+            or el.query_selector("h3")
+            or el.query_selector("h2")
+            or el.query_selector("h4")
+            or el.query_selector("strong")
         )
         if not title_el:
             return None
-        full_title = title_el.get_text(strip=True)
+        full_title = title_el.inner_text().strip()
+        if not full_title:
+            return None
         series_title, volume = parse_volume(full_title)
 
         # 著者
         author_el = (
-            item.select_one(".item-author")
-            or item.select_one(".author")
-            or item.select_one(".creator")
+            el.query_selector("[class*='author']")
+            or el.query_selector("[class*='creator']")
+            or el.query_selector(".c-book__author")
+            or el.query_selector("p.author")
         )
-        author = author_el.get_text(strip=True) if author_el else ""
+        author = author_el.inner_text().strip() if author_el else ""
 
         # 発売日
         date_el = (
-            item.select_one(".item-date")
-            or item.select_one(".release-date")
-            or item.select_one("time")
-            or item.select_one(".date")
+            el.query_selector("[class*='date']")
+            or el.query_selector("time")
+            or el.query_selector("[class*='release']")
         )
         release_date = ""
         if date_el:
-            date_text = date_el.get("datetime") or date_el.get_text(strip=True)
-            m = re.search(r"(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})", date_text)
-            if m:
-                release_date = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+            date_text = date_el.get_attribute("datetime") or date_el.inner_text()
+            release_date = parse_date(date_text)
 
         # カバー画像
-        img_el = item.select_one("img")
+        img_el = el.query_selector("img")
         cover_url = ""
         if img_el:
-            cover_url = img_el.get("src") or img_el.get("data-src") or ""
+            cover_url = (
+                img_el.get_attribute("src")
+                or img_el.get_attribute("data-src")
+                or img_el.get_attribute("data-lazy")
+                or ""
+            )
             if cover_url and not cover_url.startswith("http"):
                 cover_url = urljoin(BASE_URL, cover_url)
 
         # 詳細URL
-        link_el = item.select_one("a")
+        link_el = el.query_selector("a")
         detail_url = ""
         if link_el:
-            href = link_el.get("href", "")
+            href = link_el.get_attribute("href") or ""
             if href:
                 detail_url = urljoin(BASE_URL, href)
 
-        # ISBN / product code
-        isbn = item.get("data-isbn") or item.get("data-code") or ""
+        # ラベル
+        label_el = (
+            el.query_selector("[class*='label']")
+            or el.query_selector("[class*='imprint']")
+            or el.query_selector("[class*='magazine']")
+        )
+        label = label_el.inner_text().strip() if label_el else ""
 
-        # ラベル (KC, マガジン KC, etc.)
-        label_el = item.select_one(".label") or item.select_one(".imprint")
-        label = label_el.get_text(strip=True) if label_el else ""
+        # ISBN
+        isbn = el.get_attribute("data-isbn") or el.get_attribute("data-code") or ""
 
+        sid = make_series_id(series_title)
         return {
-            "id": make_series_id(series_title) + (f"_{volume}" if volume else ""),
-            "series_id": make_series_id(series_title),
+            "id": sid + (f"_{volume}" if volume else ""),
+            "series_id": sid,
             "series_title": series_title,
             "full_title": full_title,
             "volume": volume,
@@ -153,138 +266,115 @@ def parse_comic_item(item) -> dict | None:
             "isbn": isbn,
         }
     except Exception as e:
-        print(f"  Parse error: {e}")
         return None
 
 
-def scrape_new_releases(months: int = 3) -> list[dict]:
-    """新刊一覧ページをスクレイピングする"""
-    session = requests.Session()
-    all_comics: list[dict] = []
-    seen_ids: set[str] = set()
-
-    # まずトップページにアクセスしてクッキーを取得
-    print("Fetching top page...")
-    fetch_page(session, BASE_URL)
-    time.sleep(1)
-
-    # 月別ページを取得 (今月 + 過去 months ヶ月)
-    now = datetime.now()
-    pages_to_fetch = [NEW_RELEASE_URL]
-
-    # 月別フィルタが存在する場合の追加URL
-    for i in range(months):
-        month = (now.month - i - 1) % 12 + 1
-        year = now.year - ((now.month - i - 1) // 12)
-        pages_to_fetch.append(f"{NEW_RELEASE_URL}?year={year}&month={month:02d}")
-
-    for url in pages_to_fetch:
-        print(f"Fetching: {url}")
-        soup = fetch_page(session, url)
-        if not soup:
-            time.sleep(2)
-            continue
-
-        # 複数のセレクタでコミックアイテムを検索
-        items = (
-            soup.select(".product-item")
-            or soup.select(".book-item")
-            or soup.select(".item")
-            or soup.select("li.release-item")
-            or soup.select(".new-release-item")
-            or soup.select("article")
-        )
-
-        print(f"  Found {len(items)} items")
-
-        for item in items:
-            comic = parse_comic_item(item)
-            if comic and comic["id"] not in seen_ids:
-                seen_ids.add(comic["id"])
-                all_comics.append(comic)
-
-        # ページネーション
-        next_page = soup.select_one("a.next") or soup.select_one(".pagination a[rel='next']")
-        page = 2
-        while next_page and page <= 10:
-            next_url = urljoin(BASE_URL, next_page.get("href", ""))
-            if not next_url or next_url in pages_to_fetch:
-                break
-            print(f"  Fetching page {page}: {next_url}")
-            time.sleep(1.5)
-            soup = fetch_page(session, next_url)
-            if not soup:
-                break
-            items = (
-                soup.select(".product-item")
-                or soup.select(".book-item")
-                or soup.select(".item")
-                or soup.select("li.release-item")
-                or soup.select(".new-release-item")
-                or soup.select("article")
-            )
+def extract_from_json_ld(page) -> list[dict]:
+    """JSON-LDスキーマからフォールバック取得する。"""
+    results = []
+    try:
+        scripts = page.query_selector_all('script[type="application/ld+json"]')
+        for s in scripts:
+            raw = s.inner_text()
+            data = json.loads(raw)
+            if isinstance(data, list):
+                items = data
+            elif isinstance(data, dict) and "@graph" in data:
+                items = data["@graph"]
+            else:
+                items = [data]
             for item in items:
-                comic = parse_comic_item(item)
-                if comic and comic["id"] not in seen_ids:
-                    seen_ids.add(comic["id"])
-                    all_comics.append(comic)
-            next_page = soup.select_one("a.next") or soup.select_one(".pagination a[rel='next']")
-            page += 1
+                if item.get("@type") not in ("Book", "Product", "CreativeWork"):
+                    continue
+                name = item.get("name", "")
+                if not name:
+                    continue
+                series_title, volume = parse_volume(name)
+                sid = make_series_id(series_title)
+                release_date = parse_date(item.get("datePublished", ""))
+                results.append({
+                    "id": sid + (f"_{volume}" if volume else ""),
+                    "series_id": sid,
+                    "series_title": series_title,
+                    "full_title": name,
+                    "volume": volume,
+                    "author": item.get("author", {}).get("name", "") if isinstance(item.get("author"), dict) else "",
+                    "release_date": release_date,
+                    "cover_url": item.get("image", ""),
+                    "detail_url": item.get("url", ""),
+                    "label": "",
+                    "isbn": item.get("isbn", ""),
+                })
+    except Exception:
+        pass
+    return results
 
-        time.sleep(1.5)
 
-    return all_comics
-
+# ─── 保存 ──────────────────────────────────────────────────────
 
 def load_existing(path: Path) -> list[dict]:
     if path.exists():
         try:
             with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("comics", [])
-        except (json.JSONDecodeError, KeyError):
+                return json.load(f).get("comics", [])
+        except Exception:
             pass
     return []
 
 
 def merge_comics(existing: list[dict], new: list[dict]) -> list[dict]:
-    """既存データと新規データをマージ（IDで重複排除）"""
     merged = {c["id"]: c for c in existing}
-    for comic in new:
-        merged[comic["id"]] = comic
+    for c in new:
+        merged[c["id"]] = c
     return list(merged.values())
 
 
-def save(comics: list[dict], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # 発売日の新しい順にソート
-    comics_sorted = sorted(
+def save(comics: list[dict]) -> None:
+    JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    sorted_comics = sorted(
         comics,
         key=lambda c: c.get("release_date") or "0000-00-00",
         reverse=True,
     )
     payload = {
         "generated_at": datetime.now().isoformat(),
-        "count": len(comics_sorted),
-        "comics": comics_sorted,
+        "count": len(sorted_comics),
+        "comics": sorted_comics,
     }
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"Saved {len(comics_sorted)} comics to {path}")
 
+    # JSON
+    with open(JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"Saved {len(sorted_comics)} comics to {JSON_PATH}")
+
+    # JS (file:// でも読めるよう var に代入)
+    js_content = "var COMICS_DATA = " + json.dumps(payload, ensure_ascii=False, indent=2) + ";\n"
+    with open(JS_PATH, "w", encoding="utf-8") as f:
+        f.write(js_content)
+    print(f"Saved JS data to {JS_PATH}")
+
+
+# ─── メイン ────────────────────────────────────────────────────
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="講談社コミックス新刊スクレイパー")
+    parser.add_argument("--months", type=int, default=3, help="取得する月数 (default: 3)")
+    parser.add_argument("--debug", action="store_true", help="HTMLをファイルに保存して確認")
+    parser.add_argument("--no-merge", action="store_true", help="既存データを無視して上書き")
+    args = parser.parse_args()
+
     print("=== 講談社コミックス新刊スクレイパー ===")
     print(f"Target: {NEW_RELEASE_URL}")
     print()
 
-    new_comics = scrape_new_releases(months=2)
+    new_comics = scrape_with_playwright(months=args.months, debug=args.debug)
     print(f"\nFetched {len(new_comics)} new comics")
 
-    existing = load_existing(OUTPUT_PATH)
+    existing = [] if args.no_merge else load_existing(JSON_PATH)
     merged = merge_comics(existing, new_comics)
 
-    save(merged, OUTPUT_PATH)
+    save(merged)
     print("Done!")
 
 

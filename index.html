@@ -557,6 +557,8 @@
 <!-- Toast Container -->
 <div class="toast-container" id="toast-container"></div>
 
+<!-- data/comics.js を先に読み込む（file:// 対応）。存在しない場合は init() 内で fetch にフォールバック -->
+<script src="data/comics.js" onerror="window.__comicsJsMissing=true"></script>
 <script>
 const DATA_URL = 'data/comics.json';
 const STORAGE_KEY = 'kodan-hidden-series';
@@ -770,30 +772,36 @@ window.undoDislike = function(seriesTitle, toastEl) {
 };
 
 // ===== Init =====
+function applyData(data) {
+  allComics = data.comics || [];
+  generatedAt = data.generated_at || '';
+  if (generatedAt) {
+    const d = new Date(generatedAt);
+    document.getElementById('updated-at').textContent =
+      `更新: ${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  }
+  buildLabelFilter(allComics);
+  document.getElementById('loading').style.display = 'none';
+  renderGrid();
+}
+
 async function init() {
   loadHidden();
 
+  // file:// で開いた場合: <script src="data/comics.js"> が設定した COMICS_DATA を使う
+  if (typeof COMICS_DATA !== 'undefined') {
+    applyData(COMICS_DATA);
+    return;
+  }
+
+  // HTTP サーバー経由の場合: fetch で取得
   try {
-    const res = await fetch(DATA_URL);
+    const res = await fetch('data/comics.json');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-
-    allComics = data.comics || [];
-    generatedAt = data.generated_at || '';
-
-    if (generatedAt) {
-      const d = new Date(generatedAt);
-      document.getElementById('updated-at').textContent =
-        `更新: ${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-    }
-
-    buildLabelFilter(allComics);
-    document.getElementById('loading').style.display = 'none';
-    renderGrid();
-
+    applyData(await res.json());
   } catch (e) {
     document.getElementById('loading').textContent =
-      `データの読み込みに失敗しました: ${e.message}`;
+      `データの読み込みに失敗しました。scraper.py を実行してデータを取得してください。`;
   }
 }
 
