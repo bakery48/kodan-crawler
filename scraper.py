@@ -264,9 +264,78 @@ def scrape_page(page, url: str, debug_responses: list) -> list[dict]:
                 results.append(comic)
         return results
 
-    # フォールバック: DOM パース
+    # フォールバック1: __NEXT_DATA__ (Next.js)
+    next_results = extract_from_next_data(page)
+    if next_results:
+        print(f"  Found {len(next_results)} items in __NEXT_DATA__")
+        return next_results
+
+    # フォールバック2: インラインJSONスクリプト全探索
+    inline_results = extract_from_inline_scripts(page)
+    if inline_results:
+        print(f"  Found {len(inline_results)} items in inline scripts")
+        return inline_results
+
+    # フォールバック3: DOM パース
     print("  No API data captured, falling back to DOM parse...")
     return extract_from_dom(page)
+
+
+def extract_from_inline_scripts(page) -> list[dict]:
+    """インラインscriptタグ内のJSONを全探索してコミックデータを抽出する。"""
+    results = []
+    seen_ids: set[str] = set()
+    try:
+        scripts = page.query_selector_all('script:not([src])')
+        for s in scripts:
+            text = s.inner_text().strip()
+            if not text or len(text) < 50:
+                continue
+            # JSON文字列を含む可能性のある箇所を探す
+            for match in re.finditer(r'\{["\'](?:title|isbn|releaseDate|bookTitle)["\']', text):
+                start = match.start()
+                # バランスの取れたJSONオブジェクトを抽出
+                depth, i = 0, start
+                while i < len(text):
+                    if text[i] == '{':
+                        depth += 1
+                    elif text[i] == '}':
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                try:
+                    obj = json.loads(text[start:i+1])
+                    entries = walk_json(obj)
+                    for entry in entries:
+                        comic = parse_api_entry(entry)
+                        if comic and comic["id"] not in seen_ids:
+                            seen_ids.add(comic["id"])
+                            results.append(comic)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"  Inline script parse error: {e}")
+    return results
+
+
+def extract_from_next_data(page) -> list[dict]:
+    """Next.js の __NEXT_DATA__ スクリプトタグからデータを抽出する。"""
+    try:
+        el = page.query_selector('script#__NEXT_DATA__')
+        if not el:
+            return []
+        data = json.loads(el.inner_text())
+        entries = walk_json(data)
+        results = []
+        for entry in entries:
+            comic = parse_api_entry(entry)
+            if comic:
+                results.append(comic)
+        return results
+    except Exception as e:
+        print(f"  __NEXT_DATA__ parse error: {e}")
+        return []
 
 
 def extract_from_dom(page) -> list[dict]:
