@@ -339,31 +339,9 @@ def extract_from_next_data(page) -> list[dict]:
 
 
 def extract_from_dom(page) -> list[dict]:
-    """DOM からコミック情報を抽出する。"""
-    SELECTORS = [
-        "ul.o-section-list__list li",
-        ".o-section-list__list li",
-        "ul.c-book-list li",
-        ".c-book-list__item",
-        ".p-book-list__item",
-        ".release-list li",
-        ".book-list li",
-        "li.book",
-        "article.book",
-        "li[class*='book']",
-        "li[class*='product']",
-        "li[class*='item']",
-        ".product-list li",
-    ]
-    items = []
-    for sel in SELECTORS:
-        els = page.query_selector_all(sel)
-        if els:
-            items = els
-            break
-
+    """DOM からコミック情報を抽出する（講談社サイト構造対応）。"""
+    items = page.query_selector_all("a.app-product-list-item")
     if not items:
-        # JSON-LD スキーマ
         return extract_from_json_ld(page)
 
     results = []
@@ -375,61 +353,41 @@ def extract_from_dom(page) -> list[dict]:
 
 
 def parse_dom_element(el) -> dict | None:
-    def text(selectors):
-        for sel in selectors:
-            try:
-                node = el.query_selector(sel)
-                if node:
-                    t = node.inner_text().strip()
-                    if t:
-                        return t
-            except Exception:
-                pass
-        return ""
+    def text(selector):
+        try:
+            node = el.query_selector(selector)
+            return node.inner_text().strip() if node else ""
+        except Exception:
+            return ""
 
-    def attr(selectors, attribute):
-        for sel in selectors:
-            try:
-                node = el.query_selector(sel)
-                if node:
-                    v = node.get_attribute(attribute)
-                    if v:
-                        return v.strip()
-            except Exception:
-                pass
-        return ""
-
-    full_title = text(["[class*='title']", "h3", "h2", "h4", "strong"])
+    # タイトル
+    full_title = text(".app-product-list-item-detail-name strong") \
+                 or text(".app-product-list-item-detail-name")
     if not full_title:
         return None
     series_title, volume = parse_volume(full_title)
 
-    author  = text(["[class*='author']", "[class*='creator']", "p.author"])
-    date_raw = text(["[class*='date']", "[class*='release']", "time"])
-    release_date = parse_date(date_raw)
+    # 著者（"著：名前，原作：名前，イラスト：名前" → ロールプレフィックスを除去）
+    author_raw = text(".app-product-list-item-detail-authors")
+    author = re.sub(r"(著|原作|イラスト|漫画|作画|監修|編)：", "", author_raw).strip()
 
-    img = el.query_selector("img")
+    # 発売日（"2026.05.03発売" → "2026-05-03"）
+    date_raw = text(".app-product-list-item-detail-release")
+    release_date = parse_date(re.sub(r"[^\d]", "-", date_raw.replace("発売", "")).strip("-"))
+
+    # カバー画像
+    img = el.query_selector(".app-product-list-item-image img")
     cover_url = ""
     if img:
-        cover_url = (
-            img.get_attribute("src")
-            or img.get_attribute("data-src")
-            or img.get_attribute("data-lazy")
-            or ""
-        )
-        if cover_url and not cover_url.startswith("http"):
-            cover_url = urljoin(BASE_URL, cover_url)
+        cover_url = img.get_attribute("src") or img.get_attribute("data-src") or ""
 
-    link = el.query_selector("a")
-    detail_url = ""
-    if link:
-        href = link.get_attribute("href") or ""
-        if href:
-            detail_url = urljoin(BASE_URL, href)
+    # 詳細URL（el 自体が <a> タグ）
+    detail_url = el.get_attribute("href") or ""
+    if detail_url and not detail_url.startswith("http"):
+        detail_url = urljoin(BASE_URL, detail_url)
 
-    isbn = (el.get_attribute("data-isbn") or el.get_attribute("data-code") or "")
-    isbn = normalize_isbn(isbn)
-    label = text(["[class*='label']", "[class*='imprint']", "[class*='magazine']"])
+    # レーベル
+    label = text(".app-product-list-item-detail-label")
 
     sid = make_series_id(series_title)
     return {
@@ -443,7 +401,7 @@ def parse_dom_element(el) -> dict | None:
         "cover_url":    cover_url,
         "detail_url":   detail_url,
         "label":        label,
-        "isbn":         isbn,
+        "isbn":         "",
     }
 
 
@@ -517,24 +475,16 @@ def scrape_all(months: int, debug: bool) -> list[dict]:
                     seen_ids.add(c["id"])
                     all_comics.append(c)
 
-            # ページネーション
+            # ページネーション（URLに ?page=N を付与して順に取得）
+            sep = "&" if "?" in url else "?"
             page_num = 2
             while page_num <= 30:
-                next_btn = (
-                    page.query_selector("a.next")
-                    or page.query_selector(".pagination a[rel='next']")
-                    or page.query_selector("a:has-text('次へ')")
-                    or page.query_selector("a:has-text('次のページ')")
-                )
-                if not next_btn:
-                    break
-                href = next_btn.get_attribute("href") or ""
-                if not href:
-                    break
-                next_url = urljoin(BASE_URL, href)
+                next_url = f"{url}{sep}page={page_num}"
                 print(f"  Page {page_num}: {next_url}")
                 comics = scrape_page(page, next_url, debug_responses)
                 print(f"    Found {len(comics)} items")
+                if not comics:
+                    break
                 for c in comics:
                     if c["id"] not in seen_ids:
                         seen_ids.add(c["id"])
