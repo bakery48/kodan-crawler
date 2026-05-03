@@ -30,8 +30,8 @@ from urllib.parse import urljoin
 
 import requests as req_lib
 
-BASE_URL        = "https://kc.kodansha.co.jp"
-NEW_RELEASE_URL = f"{BASE_URL}/new_release"
+BASE_URL        = "https://www.kodansha.co.jp"
+NEW_RELEASE_URL = f"{BASE_URL}/comic/new-releases"
 JSON_PATH = Path(__file__).parent / "data" / "comics.json"
 JS_PATH   = Path(__file__).parent / "data" / "comics.js"
 
@@ -247,11 +247,10 @@ def scrape_page(page, url: str, debug_responses: list) -> list[dict]:
         print(f"  Navigation error: {e}")
         return []
 
-    # レンダリング後のHTMLを1度だけ保存（セレクタ確認用）
+    # レンダリング後のHTMLを保存（デバッグ用・毎回上書き）
     html_path = Path(__file__).parent / "data" / "debug_page.html"
-    if not html_path.exists():
-        html_path.write_text(page.content(), encoding="utf-8")
-        print(f"  Rendered HTML saved to {html_path}  (delete to refresh)")
+    html_path.write_text(page.content(), encoding="utf-8")
+    print(f"  Rendered HTML saved to {html_path}")
 
     # API 傍受でデータが取れた場合
     if captured:
@@ -418,7 +417,10 @@ def scrape_all(months: int, debug: bool) -> list[dict]:
     from playwright.sync_api import sync_playwright
 
     now   = datetime.now()
+    # メインの新刊一覧ページ
     urls  = [NEW_RELEASE_URL]
+    # 月別ページ（新サイトのURLパターンが判明次第ここに追加）
+    # 例: urls.append(f"{NEW_RELEASE_URL}?year={y}&month={m:02d}")
     for i in range(months):
         m = (now.month - i - 1) % 12 + 1
         y = now.year - ((now.month - i - 1) // 12)
