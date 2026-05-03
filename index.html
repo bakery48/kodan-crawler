@@ -689,10 +689,10 @@ function renderGrid() {
     const isNewRelease = isNew(comic.release_date);
     const badge = isNewRelease ? '<span class="card-badge">NEW</span>' : '';
 
-    const safeTitle  = escHtml(comic.series_title).replace(/'/g, "\\'");
-    const safeAuthor = escHtml(comic.author || '').replace(/'/g, "\\'");
+    const jsSafeTitle  = comic.series_title.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const jsSafeAuthor = (comic.author || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const coverHtml = comic.cover_url
-      ? `<img src="${escHtml(comic.cover_url)}" alt="${escHtml(comic.series_title)}" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHtml('${safeTitle}','${safeAuthor}')">`
+      ? `<img src="${escHtml(comic.cover_url)}" alt="${escHtml(comic.series_title)}" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHtml('${jsSafeTitle}','${jsSafeAuthor}')">`
       : placeholderHtml(comic.series_title, comic.author);
 
     const volText = comic.volume ? `第${comic.volume}巻` : '';
@@ -702,7 +702,7 @@ function renderGrid() {
         <div class="card-cover">
           ${coverHtml}
           ${badge}
-          <button class="card-dislike-btn" onclick="markDislike('${escHtml(comic.series_title)}')">
+          <button class="card-dislike-btn" onclick="markDislike('${jsSafeTitle}')">
             🚫 興味なし
           </button>
         </div>
@@ -743,12 +743,13 @@ function renderHiddenPanel() {
   btn.style.display = count > 0 ? 'inline-flex' : 'none';
   countEl.textContent = count;
 
-  tagsEl.innerHTML = [...hiddenSeries].map(s =>
-    `<span class="hidden-tag">
+  tagsEl.innerHTML = [...hiddenSeries].map(s => {
+    const jsSafe = s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<span class="hidden-tag">
       ${escHtml(s)}
-      <button onclick="restoreSeries('${escHtml(s).replace(/'/g, "\\'")}')">✕</button>
-    </span>`
-  ).join('');
+      <button onclick="restoreSeries('${jsSafe}')">✕</button>
+    </span>`;
+  }).join('');
 }
 
 function toggleHiddenPanel() {

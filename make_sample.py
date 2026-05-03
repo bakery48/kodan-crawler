@@ -87,11 +87,18 @@ def make_id(title, volume=""):
     sid = hashlib.md5(re.sub(r"\s+","",title).encode()).hexdigest()[:12]
     return sid + (f"_{volume}" if volume else ""), sid
 
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
 def fetch_openbd_batch(isbns):
     resp = requests.get(
         "https://api.openbd.jp/v1/get",
         params={"isbn": ",".join(isbns)},
         timeout=30,
+        headers={"User-Agent": BROWSER_UA},
     )
     resp.raise_for_status()
     return resp.json()
@@ -99,11 +106,15 @@ def fetch_openbd_batch(isbns):
 def build_comics():
     print(f"Fetching {len(KNOWN_ISBNS)} ISBNs from OpenBD...")
     all_items = []
-    batch_size = 200
+    batch_size = 50
     for i in range(0, len(KNOWN_ISBNS), batch_size):
         batch = KNOWN_ISBNS[i:i+batch_size]
-        items = fetch_openbd_batch(batch)
-        all_items.extend(items)
+        try:
+            items = fetch_openbd_batch(batch)
+            all_items.extend(items)
+        except Exception as e:
+            print(f"  Warning: batch {i//batch_size + 1} failed ({e}), skipping")
+            all_items.extend([None] * len(batch))
         print(f"  Fetched {min(i+batch_size, len(KNOWN_ISBNS))}/{len(KNOWN_ISBNS)}")
         time.sleep(0.5)
 

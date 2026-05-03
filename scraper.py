@@ -245,12 +245,15 @@ def scrape_page(page, url: str, debug_responses: list) -> list[dict]:
         page.goto(url, wait_until="networkidle", timeout=30_000)
     except Exception as e:
         print(f"  Navigation error: {e}")
+        page.remove_listener("response", on_response)
         return []
 
     # レンダリング後のHTMLを保存（デバッグ用・毎回上書き）
     html_path = Path(__file__).parent / "data" / "debug_page.html"
     html_path.write_text(page.content(), encoding="utf-8")
     print(f"  Rendered HTML saved to {html_path}")
+
+    page.remove_listener("response", on_response)
 
     # API 傍受でデータが取れた場合
     if captured:
