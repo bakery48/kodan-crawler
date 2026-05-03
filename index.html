@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>講談社コミックス 新刊チェッカー</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #22263a;
+      --border: #2e3250;
+      --accent: #e63946;
+      --accent2: #457b9d;
+      --text: #e8eaf0;
+      --text-muted: #7880a0;
+      --text-dim: #4a5070;
+      --hidden-bg: rgba(40, 20, 20, 0.6);
+      --tag-bg: #1e2235;
+      --radius: 10px;
+      --card-w: 160px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Yu Gothic", sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    /* ===== HEADER ===== */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .logo {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    .header-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    .header-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      transition: background 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:hover { background: var(--border); }
+
+    .btn-danger {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .btn-danger:hover { background: rgba(230, 57, 70, 0.12); }
+
+    /* ===== TOOLBAR ===== */
+    .toolbar {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    .search-box {
+      flex: 1;
+      min-width: 200px;
+      max-width: 360px;
+      position: relative;
+    }
+
+    .search-box input {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 12px 7px 34px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+
+    .search-box input::placeholder { color: var(--text-dim); }
+    .search-box input:focus { border-color: var(--accent2); }
+
+    .search-icon {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      font-size: 14px;
+    }
+
+    .filter-select {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .filter-select:focus { border-color: var(--accent2); }
+
+    .stats {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-left: auto;
+    }
+
+    .stats strong { color: var(--text); }
+
+    /* ===== HIDDEN SERIES PANEL ===== */
+    .hidden-panel {
+      display: none;
+      background: var(--hidden-bg);
+      border-bottom: 1px solid rgba(230, 57, 70, 0.3);
+      padding: 12px 20px;
+    }
+
+    .hidden-panel.open { display: block; }
+
+    .hidden-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #f4a3a8;
+    }
+
+    .hidden-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .hidden-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid rgba(230, 57, 70, 0.4);
+      border-radius: 20px;
+      padding: 4px 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .hidden-tag button {
+      background: none;
+      border: none;
+      color: var(--accent);
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .hidden-tag button:hover { color: #ff6b7a; }
+
+    /* ===== MAIN GRID ===== */
+    .main {
+      padding: 20px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .comics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(var(--card-w), 1fr));
+      gap: 16px;
+    }
+
+    /* ===== CARD ===== */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      position: relative;
+      transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      border-color: var(--accent2);
+    }
+
+    .card-cover {
+      aspect-ratio: 2/3;
+      background: var(--surface2);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-cover img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .cover-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: linear-gradient(135deg, var(--surface2) 0%, #1a1f35 100%);
+    }
+
+    .cover-placeholder .book-icon {
+      font-size: 36px;
+      opacity: 0.3;
+    }
+
+    .cover-placeholder .placeholder-title {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+      padding: 0 8px;
+      word-break: break-all;
+      line-height: 1.4;
+    }
+
+    .card-badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      background: var(--accent);
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .card-dislike-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: rgba(15, 17, 23, 0.85);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 4px 8px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s, background 0.15s, color 0.15s;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card:hover .card-dislike-btn { opacity: 1; }
+
+    .card-dislike-btn:hover {
+      background: rgba(230, 57, 70, 0.9);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    .card-body {
+      padding: 10px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .card-title {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.4;
+      color: var(--text);
+      word-break: break-all;
+    }
+
+    .card-volume {
+      font-size: 11px;
+      color: var(--accent2);
+      font-weight: 600;
+    }
+
+    .card-author {
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: auto;
+      padding-top: 6px;
+    }
+
+    .card-date {
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    .card-label {
+      font-size: 10px;
+      background: var(--tag-bg);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 90px;
+    }
+
+    /* ===== EMPTY STATE ===== */
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+    }
+
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+    .empty-state p { font-size: 14px; }
+
+    /* ===== LOADING ===== */
+    .loading {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* ===== TOAST ===== */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .toast {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      animation: slideIn 0.2s ease;
+      max-width: 320px;
+    }
+
+    .toast .undo-btn {
+      background: none;
+      border: none;
+      color: var(--accent2);
+      font-size: 13px;
+      cursor: pointer;
+      text-decoration: underline;
+      padding: 0;
+      margin-left: auto;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateX(40px); opacity: 0; }
+      to   { transform: translateX(0);    opacity: 1; }
+    }
+
+    @keyframes slideOut {
+      from { transform: translateX(0);    opacity: 1; }
+      to   { transform: translateX(40px); opacity: 0; }
+    }
+
+    .toast.removing { animation: slideOut 0.2s ease forwards; }
+
+    /* ===== DATE SECTION HEADER ===== */
+    .date-section {
+      grid-column: 1 / -1;
+      margin-top: 8px;
+      padding: 6px 10px;
+      background: var(--surface2);
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .date-section::before {
+      content: '';
+      display: inline-block;
+      width: 3px;
+      height: 14px;
+      background: var(--accent2);
+      border-radius: 2px;
+    }
+
+    /* ===== BADGE for new items ===== */
+    .new-badge {
+      display: inline-block;
+      background: var(--accent);
+      color: white;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 0.05em;
+    }
+
+    /* ===== BADGE count on hidden panel toggle ===== */
+    .badge-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      background: var(--accent);
+      color: white;
+      font-size: 11px;
+      font-weight: 700;
+      border-radius: 9px;
+      padding: 0 5px;
+    }
+
+    /* ===== RESPONSIVE ===== */
+    @media (max-width: 600px) {
+      :root { --card-w: 140px; }
+      .main { padding: 12px; }
+      header { padding: 0 12px; }
+      .toolbar { padding: 10px 12px; }
+      .hidden-panel { padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">講談社<span>コミックス</span> 新刊</div>
+  <div class="header-meta" id="updated-at"></div>
+  <div class="header-right">
+    <button class="btn btn-danger" id="toggle-hidden-btn" style="display:none">
+      <span>🚫</span>
+      <span>興味なし管理</span>
+      <span class="badge-count" id="hidden-count">0</span>
+    </button>
+  </div>
+</header>
+
+<!-- Hidden Series Panel -->
+<div class="hidden-panel" id="hidden-panel">
+  <div class="hidden-panel-header">
+    🚫 興味なしにしたシリーズ（クリックで復元）
+  </div>
+  <div class="hidden-tags" id="hidden-tags"></div>
+</div>
+
+<!-- Toolbar -->
+<div class="toolbar">
+  <div class="search-box">
+    <span class="search-icon">🔍</span>
+    <input type="text" id="search-input" placeholder="タイトル・著者で検索…" autocomplete="off">
+  </div>
+  <select class="filter-select" id="label-filter">
+    <option value="">すべてのレーベル</option>
+  </select>
+  <div class="stats" id="stats"></div>
+</div>
+
+<!-- Main Content -->
+<div class="main">
+  <div class="loading" id="loading">読み込み中…</div>
+  <div class="comics-grid" id="comics-grid"></div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+const DATA_URL = 'data/comics.json';
+const STORAGE_KEY = 'kodan-hidden-series';
+
+let allComics = [];
+let hiddenSeries = new Set();
+let activeSearch = '';
+let activeLabel = '';
+let generatedAt = '';
+const TODAY = new Date().toISOString().slice(0, 10);
+const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+
+// ===== Storage =====
+function loadHidden() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    hiddenSeries = new Set(raw ? JSON.parse(raw) : []);
+  } catch { hiddenSeries = new Set(); }
+}
+
+function saveHidden() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...hiddenSeries]));
+}
+
+// ===== Format Helpers =====
+function fmtDate(d) {
+  if (!d) return '―';
+  const [y, m, day] = d.split('-');
+  return `${y}/${m}/${day}`;
+}
+
+function fmtDateSection(d) {
+  if (!d) return '';
+  const [y, m] = d.split('-');
+  return `${y}年${parseInt(m)}月`;
+}
+
+function isNew(releaseDate) {
+  return releaseDate >= THIRTY_DAYS_AGO && releaseDate <= TODAY;
+}
+
+// ===== Build Label Filter =====
+function buildLabelFilter(comics) {
+  const labels = [...new Set(comics.map(c => c.label).filter(Boolean))].sort();
+  const sel = document.getElementById('label-filter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">すべてのレーベル</option>';
+  labels.forEach(l => {
+    const opt = document.createElement('option');
+    opt.value = l;
+    opt.textContent = l;
+    if (l === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+}
+
+// ===== Filter =====
+function getVisible() {
+  return allComics.filter(c => {
+    if (hiddenSeries.has(c.series_title)) return false;
+    if (activeLabel && c.label !== activeLabel) return false;
+    if (activeSearch) {
+      const q = activeSearch.toLowerCase();
+      const haystack = (c.series_title + c.full_title + c.author + c.label).toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+// ===== Render =====
+function renderGrid() {
+  const grid = document.getElementById('comics-grid');
+  const visible = getVisible();
+
+  // Update stats
+  const totalVisible = visible.length;
+  const totalHidden = allComics.filter(c => hiddenSeries.has(c.series_title)).length;
+  document.getElementById('stats').innerHTML =
+    `<strong>${totalVisible}</strong> 件表示` +
+    (totalHidden > 0 ? ` / <span style="color:var(--accent)">${totalHidden} 件非表示</span>` : '');
+
+  // Update hidden panel
+  renderHiddenPanel();
+
+  if (visible.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state">
+        <div class="icon">📚</div>
+        <p>${activeSearch || activeLabel ? '検索結果がありません' : 'コミックがありません'}</p>
+      </div>`;
+    return;
+  }
+
+  const html = [];
+  let lastMonth = '';
+
+  visible.forEach(comic => {
+    const month = fmtDateSection(comic.release_date);
+    if (month !== lastMonth && !activeSearch) {
+      html.push(`<div class="date-section">${month || '発売日不明'}</div>`);
+      lastMonth = month;
+    }
+
+    const isNewRelease = isNew(comic.release_date);
+    const badge = isNewRelease ? '<span class="card-badge">NEW</span>' : '';
+
+    const coverHtml = comic.cover_url
+      ? `<img src="${escHtml(comic.cover_url)}" alt="${escHtml(comic.series_title)}" loading="lazy" onerror="this.parentElement.innerHTML=placeholderHtml('${escHtml(comic.series_title)}')">`
+      : `<div class="cover-placeholder"><div class="book-icon">📖</div><div class="placeholder-title">${escHtml(comic.series_title)}</div></div>`;
+
+    const volText = comic.volume ? `第${comic.volume}巻` : '';
+
+    html.push(`
+      <div class="card" data-id="${escHtml(comic.id)}" data-series="${escHtml(comic.series_title)}">
+        <div class="card-cover">
+          ${coverHtml}
+          ${badge}
+          <button class="card-dislike-btn" onclick="markDislike('${escHtml(comic.series_title)}')">
+            🚫 興味なし
+          </button>
+        </div>
+        <div class="card-body">
+          <div class="card-title">${escHtml(comic.series_title)}</div>
+          ${volText ? `<div class="card-volume">${escHtml(volText)}</div>` : ''}
+          ${comic.author ? `<div class="card-author">${escHtml(comic.author)}</div>` : ''}
+          <div class="card-footer">
+            <div class="card-date">${fmtDate(comic.release_date)}</div>
+            ${comic.label ? `<div class="card-label" title="${escHtml(comic.label)}">${escHtml(comic.label)}</div>` : ''}
+          </div>
+        </div>
+      </div>`);
+  });
+
+  grid.innerHTML = html.join('');
+}
+
+function escHtml(str) {
+  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function placeholderHtml(title) {
+  return `<div class="cover-placeholder"><div class="book-icon">📖</div><div class="placeholder-title">${escHtml(title)}</div></div>`;
+}
+window.placeholderHtml = placeholderHtml;
+
+// ===== Hidden Panel =====
+function renderHiddenPanel() {
+  const count = hiddenSeries.size;
+  const btn = document.getElementById('toggle-hidden-btn');
+  const countEl = document.getElementById('hidden-count');
+  const tagsEl = document.getElementById('hidden-tags');
+
+  btn.style.display = count > 0 ? 'inline-flex' : 'none';
+  countEl.textContent = count;
+
+  tagsEl.innerHTML = [...hiddenSeries].map(s =>
+    `<span class="hidden-tag">
+      ${escHtml(s)}
+      <button onclick="restoreSeries('${escHtml(s).replace(/'/g, "\\'")}')">✕</button>
+    </span>`
+  ).join('');
+}
+
+function toggleHiddenPanel() {
+  document.getElementById('hidden-panel').classList.toggle('open');
+}
+
+// ===== Actions =====
+function markDislike(seriesTitle) {
+  hiddenSeries.add(seriesTitle);
+  saveHidden();
+  renderGrid();
+  showToast(`「${seriesTitle}」を非表示にしました`, seriesTitle);
+}
+
+window.markDislike = markDislike;
+
+function restoreSeries(seriesTitle) {
+  hiddenSeries.delete(seriesTitle);
+  saveHidden();
+  renderGrid();
+  if (hiddenSeries.size === 0) {
+    document.getElementById('hidden-panel').classList.remove('open');
+  }
+}
+
+window.restoreSeries = restoreSeries;
+
+// ===== Toast =====
+function showToast(msg, seriesTitle) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `
+    <span>${escHtml(msg)}</span>
+    <button class="undo-btn" onclick="undoDislike('${escHtml(seriesTitle).replace(/'/g, "\\'")}', this.closest('.toast'))">元に戻す</button>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => removeToast(toast), 4000);
+}
+
+function removeToast(el) {
+  el.classList.add('removing');
+  setTimeout(() => el.remove(), 200);
+}
+
+window.undoDislike = function(seriesTitle, toastEl) {
+  restoreSeries(seriesTitle);
+  removeToast(toastEl);
+};
+
+// ===== Init =====
+async function init() {
+  loadHidden();
+
+  try {
+    const res = await fetch(DATA_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    allComics = data.comics || [];
+    generatedAt = data.generated_at || '';
+
+    if (generatedAt) {
+      const d = new Date(generatedAt);
+      document.getElementById('updated-at').textContent =
+        `更新: ${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    buildLabelFilter(allComics);
+    document.getElementById('loading').style.display = 'none';
+    renderGrid();
+
+  } catch (e) {
+    document.getElementById('loading').textContent =
+      `データの読み込みに失敗しました: ${e.message}`;
+  }
+}
+
+// ===== Event Listeners =====
+document.getElementById('search-input').addEventListener('input', e => {
+  activeSearch = e.target.value.trim();
+  renderGrid();
+});
+
+document.getElementById('label-filter').addEventListener('change', e => {
+  activeLabel = e.target.value;
+  renderGrid();
+});
+
+document.getElementById('toggle-hidden-btn').addEventListener('click', toggleHiddenPanel);
+
+init();
+</script>
+</body>
+</html>
