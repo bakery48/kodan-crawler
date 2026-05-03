@@ -394,6 +394,13 @@
       color: var(--text-dim);
     }
 
+    .card-label-wrap {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      max-width: 110px;
+    }
+
     .card-label {
       font-size: 10px;
       background: var(--tag-bg);
@@ -404,8 +411,22 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      max-width: 90px;
     }
+
+    .label-hide-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 10px;
+      padding: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+    .card:hover .label-hide-btn { opacity: 0.6; }
+    .label-hide-btn:hover { opacity: 1 !important; }
 
     /* ===== EMPTY STATE ===== */
     .empty-state {
@@ -553,10 +574,12 @@
 
 <!-- Hidden Series Panel -->
 <div class="hidden-panel" id="hidden-panel">
-  <div class="hidden-panel-header">
-    🚫 興味なしにしたシリーズ（クリックで復元）
-  </div>
+  <div class="hidden-panel-header">🚫 非表示シリーズ</div>
   <div class="hidden-tags" id="hidden-tags"></div>
+  <div id="hidden-label-section" style="display:none;margin-top:10px">
+    <div class="hidden-panel-header" style="color:#7ab3cc;margin-bottom:8px">📂 非表示レーベル</div>
+    <div class="hidden-tags" id="hidden-label-tags"></div>
+  </div>
 </div>
 
 <!-- Toolbar -->
@@ -584,10 +607,12 @@
 <script src="data/comics.js" onerror="window.__comicsJsMissing=true"></script>
 <script>
 const DATA_URL = 'data/comics.json';
-const STORAGE_KEY = 'kodan-hidden-series';
+const STORAGE_KEY       = 'kodan-hidden-series';
+const LABEL_STORAGE_KEY = 'kodan-hidden-labels';
 
 let allComics = [];
 let hiddenSeries = new Set();
+let hiddenLabels = new Set();
 let activeSearch = '';
 let activeLabel = '';
 let generatedAt = '';
@@ -600,10 +625,15 @@ function loadHidden() {
     const raw = localStorage.getItem(STORAGE_KEY);
     hiddenSeries = new Set(raw ? JSON.parse(raw) : []);
   } catch { hiddenSeries = new Set(); }
+  try {
+    const raw = localStorage.getItem(LABEL_STORAGE_KEY);
+    hiddenLabels = new Set(raw ? JSON.parse(raw) : []);
+  } catch { hiddenLabels = new Set(); }
 }
 
 function saveHidden() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...hiddenSeries]));
+  localStorage.setItem(LABEL_STORAGE_KEY, JSON.stringify([...hiddenLabels]));
 }
 
 // ===== Format Helpers =====
@@ -625,9 +655,12 @@ function isNew(releaseDate) {
 
 // ===== Build Label Filter =====
 function buildLabelFilter(comics) {
-  const labels = [...new Set(comics.map(c => c.label).filter(Boolean))].sort();
+  const labels = [...new Set(comics.map(c => c.label).filter(Boolean))]
+    .filter(l => !hiddenLabels.has(l))
+    .sort();
   const sel = document.getElementById('label-filter');
   const cur = sel.value;
+  if (hiddenLabels.has(cur)) { activeLabel = ''; }
   sel.innerHTML = '<option value="">すべてのレーベル</option>';
   labels.forEach(l => {
     const opt = document.createElement('option');
@@ -642,6 +675,7 @@ function buildLabelFilter(comics) {
 function getVisible() {
   return allComics.filter(c => {
     if (hiddenSeries.has(c.series_title)) return false;
+    if (c.label && hiddenLabels.has(c.label)) return false;
     if (activeLabel && c.label !== activeLabel) return false;
     if (activeSearch) {
       const q = activeSearch.toLowerCase();
@@ -712,7 +746,10 @@ function renderGrid() {
           ${comic.author ? `<div class="card-author">${escHtml(comic.author)}</div>` : ''}
           <div class="card-footer">
             <div class="card-date">${fmtDate(comic.release_date)}</div>
-            ${comic.label ? `<div class="card-label" title="${escHtml(comic.label)}">${escHtml(comic.label)}</div>` : ''}
+            ${comic.label ? `<div class="card-label-wrap" title="右クリックでレーベルを非表示">
+              <span class="card-label">${escHtml(comic.label)}</span>
+              <button class="label-hide-btn" onclick="event.stopPropagation();markLabelHidden('${comic.label.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">🚫</button>
+            </div>` : ''}
           </div>
         </div>
       </div>`);
@@ -735,19 +772,30 @@ window.placeholderHtml = placeholderHtml;
 
 // ===== Hidden Panel =====
 function renderHiddenPanel() {
-  const count = hiddenSeries.size;
+  const total = hiddenSeries.size + hiddenLabels.size;
   const btn = document.getElementById('toggle-hidden-btn');
   const countEl = document.getElementById('hidden-count');
   const tagsEl = document.getElementById('hidden-tags');
+  const labelTagsEl = document.getElementById('hidden-label-tags');
+  const labelSection = document.getElementById('hidden-label-section');
 
-  btn.style.display = count > 0 ? 'inline-flex' : 'none';
-  countEl.textContent = count;
+  btn.style.display = total > 0 ? 'inline-flex' : 'none';
+  countEl.textContent = total;
 
   tagsEl.innerHTML = [...hiddenSeries].map(s => {
     const jsSafe = s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     return `<span class="hidden-tag">
       ${escHtml(s)}
       <button onclick="restoreSeries('${jsSafe}')">✕</button>
+    </span>`;
+  }).join('');
+
+  labelSection.style.display = hiddenLabels.size > 0 ? 'block' : 'none';
+  labelTagsEl.innerHTML = [...hiddenLabels].map(l => {
+    const jsSafe = l.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    return `<span class="hidden-tag" style="border-color:rgba(69,123,157,0.5)">
+      📂 ${escHtml(l)}
+      <button onclick="restoreLabel('${jsSafe}')" style="color:var(--accent2)">✕</button>
     </span>`;
   }).join('');
 }
@@ -763,19 +811,51 @@ function markDislike(seriesTitle) {
   renderGrid();
   showToast(`「${seriesTitle}」を非表示にしました`, seriesTitle);
 }
-
 window.markDislike = markDislike;
 
 function restoreSeries(seriesTitle) {
   hiddenSeries.delete(seriesTitle);
   saveHidden();
   renderGrid();
-  if (hiddenSeries.size === 0) {
+  if (hiddenSeries.size + hiddenLabels.size === 0) {
     document.getElementById('hidden-panel').classList.remove('open');
   }
 }
-
 window.restoreSeries = restoreSeries;
+
+function markLabelHidden(label) {
+  hiddenLabels.add(label);
+  if (activeLabel === label) { activeLabel = ''; }
+  saveHidden();
+  buildLabelFilter(allComics);
+  renderGrid();
+  showLabelToast(label);
+}
+window.markLabelHidden = markLabelHidden;
+
+function restoreLabel(label) {
+  hiddenLabels.delete(label);
+  saveHidden();
+  buildLabelFilter(allComics);
+  renderGrid();
+  if (hiddenSeries.size + hiddenLabels.size === 0) {
+    document.getElementById('hidden-panel').classList.remove('open');
+  }
+}
+window.restoreLabel = restoreLabel;
+
+function showLabelToast(label) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  const jsSafe = label.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  toast.innerHTML = `
+    <span>レーベル「${escHtml(label)}」を非表示にしました</span>
+    <button class="undo-btn" onclick="restoreLabel('${jsSafe}');this.closest('.toast').remove()">元に戻す</button>
+  `;
+  container.appendChild(toast);
+  setTimeout(() => removeToast(toast), 4000);
+}
 
 // ===== Toast =====
 function showToast(msg, seriesTitle) {
