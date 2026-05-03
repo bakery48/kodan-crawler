@@ -395,9 +395,7 @@
     }
 
     .card-label-wrap {
-      display: flex;
-      align-items: center;
-      gap: 3px;
+      position: relative;
       max-width: 110px;
     }
 
@@ -411,22 +409,22 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-
-    .label-hide-btn {
-      background: none;
-      border: none;
+      display: block;
       cursor: pointer;
-      font-size: 10px;
-      padding: 0;
-      opacity: 0;
-      transition: opacity 0.15s;
-      flex-shrink: 0;
-      line-height: 1;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
 
-    .card:hover .label-hide-btn { opacity: 0.6; }
-    .label-hide-btn:hover { opacity: 1 !important; }
+    .card-label:hover {
+      background: rgba(230,57,70,0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .card-label:hover::after {
+      content: ' 🚫';
+    }
+
+    .label-hide-btn { display: none; }
 
     /* ===== EMPTY STATE ===== */
     .empty-state {
@@ -746,9 +744,10 @@ function renderGrid() {
           ${comic.author ? `<div class="card-author">${escHtml(comic.author)}</div>` : ''}
           <div class="card-footer">
             <div class="card-date">${fmtDate(comic.release_date)}</div>
-            ${comic.label ? `<div class="card-label-wrap" title="右クリックでレーベルを非表示">
-              <span class="card-label">${escHtml(comic.label)}</span>
-              <button class="label-hide-btn" onclick="event.stopPropagation();markLabelHidden('${comic.label.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">🚫</button>
+            ${comic.label ? `<div class="card-label-wrap">
+              <span class="card-label" title="クリックでレーベルを非表示" onclick="event.stopPropagation();markLabelHidden('${comic.label.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
+                ${escHtml(comic.label)}
+              </span>
             </div>` : ''}
           </div>
         </div>
